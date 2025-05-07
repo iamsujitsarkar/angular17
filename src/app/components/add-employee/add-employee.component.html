@@ -1,0 +1,6 @@
+<h2>Add Employee</h2>
+<form [formGroup]="empForm" (ngSubmit)="onSubmit()">
+  <input formControlName="name" placeholder="Name" />
+  <input formControlName="position" placeholder="Position" />
+  <button type="submit">Add</button>
+</form>

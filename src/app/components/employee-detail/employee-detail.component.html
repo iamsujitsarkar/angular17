@@ -1,0 +1,6 @@
+<h2>Employee Details</h2>
+<div *ngIf="employee">
+  <p><strong>Name:</strong> {{ employee.name }}</p>
+  <p><strong>Position:</strong> {{ employee.position }}</p>
+  <app-task-form [employee]="employee"></app-task-form>
+</div>

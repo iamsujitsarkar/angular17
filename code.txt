@@ -1,216 +1,361 @@
-// Angular 15+ Mini Project: Employee Task Dashboard
+// src/app/models/crypto.model.ts
+export interface Crypto {
+  id: string;
+  symbol: string;
+  name: string;
+  current_price: number;
+  image: string;
+}
 
-// --- app.module.ts ---
+
+// src/app/services/crypto.service.ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable } from '@angular/core';
+import { BehaviorSubject, Observable, Subject, catchError, debounceTime, distinctUntilChanged, interval, map, merge, of, startWith, switchMap } from 'rxjs';
+import { Crypto } from '../models/crypto.model';
+
+@Injectable({ providedIn: 'root' })
+export class CryptoService {
+  private API_URL = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1';
+
+  constructor(private http: HttpClient) {}
+
+  getLivePrices(): Observable<Crypto[]> {
+    return this.http.get<Crypto[]>(this.API_URL).pipe(
+      catchError(err => {
+        console.error('API Error', err);
+        return of([]);
+      })
+    );
+  }
+}
+
+
+// src/app/components/crypto-dashboard/crypto-dashboard.component.ts
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { CryptoService } from '../../services/crypto.service';
+import { Crypto } from '../../models/crypto.model';
+import { BehaviorSubject, Observable, Subject, Subscription, debounceTime, distinctUntilChanged, interval, startWith, switchMap, takeUntil, tap } from 'rxjs';
+
+@Component({
+  selector: 'app-crypto-dashboard',
+  templateUrl: './crypto-dashboard.component.html',
+  styleUrls: ['./crypto-dashboard.component.css']
+})
+export class CryptoDashboardComponent implements OnInit, OnDestroy {
+  allCryptos: Crypto[] = [];
+  filteredCryptos: Crypto[] = [];
+  search$ = new Subject<string>();
+  destroy$ = new Subject<void>();
+  autoRefresh = true;
+  loading = false;
+
+  constructor(private cryptoService: CryptoService) {}
+
+  ngOnInit(): void {
+    const autoRefresh$ = interval(5000).pipe(startWith(0));
+
+    autoRefresh$
+      .pipe(
+        takeUntil(this.destroy$),
+        switchMap(() => {
+          this.loading = true;
+          return this.cryptoService.getLivePrices();
+        }),
+        tap(() => this.loading = false)
+      )
+      .subscribe(data => {
+        this.allCryptos = data;
+        this.filterCryptos('');
+      });
+
+    this.search$
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged()
+      )
+      .subscribe(query => this.filterCryptos(query));
+  }
+
+  onSearch(query: string) {
+    this.search$.next(query.toLowerCase());
+  }
+
+  filterCryptos(query: string) {
+    if (!query) {
+      this.filteredCryptos = this.allCryptos;
+    } else {
+      this.filteredCryptos = this.allCryptos.filter(coin =>
+        coin.name.toLowerCase().includes(query) ||
+        coin.symbol.toLowerCase().includes(query)
+      );
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+}
+
+
+// src/app/components/crypto-dashboard/crypto-dashboard.component.html
+<h2>📊 Live Crypto Prices</h2>
+<input
+  type="text"
+  placeholder="Search coin name or symbol"
+  (input)="onSearch($event.target.value)"
+  style="margin-bottom: 1rem; padding: 0.5rem; width: 300px"
+/>
+
+<table>
+  <thead>
+    <tr>
+      <th>Coin</th>
+      <th>Price (USD)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr *ngFor="let coin of filteredCryptos">
+      <td><img [src]="coin.image" width="20"> {{ coin.name }} ({{ coin.symbol.toUpperCase() }})</td>
+      <td>{{ coin.current_price | currency:'USD':'symbol' }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<p *ngIf="loading">🔄 Loading latest data...</p>
+
+
+// src/app/app.component.ts
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-root',
+  template: `<app-crypto-dashboard></app-crypto-dashboard>`
+})
+export class AppComponent {}
+
+
+// src/app/app.module.ts
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
-import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { HttpClientModule } from '@angular/common/http';
-import { RouterModule, Routes } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 
 import { AppComponent } from './app.component';
-import { HeaderComponent } from './components/header.component';
-import { EmployeeListComponent } from './components/employee-list.component';
-import { EmployeeDetailComponent } from './components/employee-detail.component';
-import { AddEmployeeComponent } from './components/add-employee.component';
-import { TaskFormComponent } from './components/task-form.component';
-
-const routes: Routes = [
-  { path: '', redirectTo: '/employees', pathMatch: 'full' },
-  { path: 'employees', component: EmployeeListComponent },
-  { path: 'employees/:id', component: EmployeeDetailComponent },
-  { path: 'add-employee', component: AddEmployeeComponent },
-];
+import { CryptoDashboardComponent } from './components/crypto-dashboard/crypto-dashboard.component';
 
 @NgModule({
   declarations: [
     AppComponent,
-    HeaderComponent,
-    EmployeeListComponent,
-    EmployeeDetailComponent,
-    AddEmployeeComponent,
-    TaskFormComponent,
+    CryptoDashboardComponent
   ],
   imports: [
     BrowserModule,
-    FormsModule,
-    ReactiveFormsModule,
     HttpClientModule,
-    RouterModule.forRoot(routes)
+    FormsModule
   ],
   bootstrap: [AppComponent]
 })
 export class AppModule {}
 
 
-// --- employee.service.ts ---
-import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+/******************************************** NgRx *******************************************************/
 
-export interface Employee {
-  id: number;
+// NgRx Setup: models, actions, reducers, selectors, and effects
+
+// src/app/models/crypto.model.ts
+export interface Crypto {
+  id: string;
+  symbol: string;
   name: string;
-  position: string;
-  tasks: string[];
-}
-
-@Injectable({ providedIn: 'root' })
-export class EmployeeService {
-  private apiUrl = 'https://jsonplaceholder.typicode.com/users';
-
-  constructor(private http: HttpClient) {}
-
-  getEmployees(): Observable<Employee[]> {
-    return this.http.get<Employee[]>(this.apiUrl);
-  }
-
-  getEmployee(id: number): Observable<Employee> {
-    return this.http.get<Employee>(`${this.apiUrl}/${id}`);
-  }
+  current_price: number;
+  image: string;
 }
 
 
-// --- app.component.ts ---
-import { Component } from '@angular/core';
+// src/app/store/actions/crypto.actions.ts
+import { createAction, props } from '@ngrx/store';
+import { Crypto } from '../../models/crypto.model';
+
+export const loadCryptos = createAction('[Crypto] Load Cryptos');
+export const loadCryptosSuccess = createAction('[Crypto] Load Cryptos Success', props<{ cryptos: Crypto[] }>());
+export const loadCryptosFailure = createAction('[Crypto] Load Cryptos Failure', props<{ error: any }>());
+export const updateSearchQuery = createAction('[Crypto] Update Search Query', props<{ query: string }>());
+
+
+// src/app/store/reducers/crypto.reducer.ts
+import { createReducer, on } from '@ngrx/store';
+import * as CryptoActions from '../actions/crypto.actions';
+import { Crypto } from '../../models/crypto.model';
+
+export interface State {
+  cryptos: Crypto[];
+  filteredCryptos: Crypto[];
+  query: string;
+  error: any;
+  loading: boolean;
+}
+
+export const initialState: State = {
+  cryptos: [],
+  filteredCryptos: [],
+  query: '',
+  error: null,
+  loading: false
+};
+
+export const cryptoReducer = createReducer(
+  initialState,
+  on(CryptoActions.loadCryptos, state => ({ ...state, loading: true })),
+  on(CryptoActions.loadCryptosSuccess, (state, { cryptos }) => ({
+    ...state,
+    cryptos,
+    filteredCryptos: filterByQuery(cryptos, state.query),
+    loading: false
+  })),
+  on(CryptoActions.loadCryptosFailure, (state, { error }) => ({ ...state, error, loading: false })),
+  on(CryptoActions.updateSearchQuery, (state, { query }) => ({
+    ...state,
+    query,
+    filteredCryptos: filterByQuery(state.cryptos, query)
+  }))
+);
+
+function filterByQuery(data: Crypto[], query: string): Crypto[] {
+  if (!query) return data;
+  return data.filter(coin =>
+    coin.name.toLowerCase().includes(query.toLowerCase()) ||
+    coin.symbol.toLowerCase().includes(query.toLowerCase())
+  );
+}
+
+
+// src/app/store/selectors/crypto.selectors.ts
+import { createFeatureSelector, createSelector } from '@ngrx/store';
+import * as fromCrypto from '../reducers/crypto.reducer';
+
+export const selectCryptoState = createFeatureSelector<fromCrypto.State>('crypto');
+
+export const selectAllCryptos = createSelector(selectCryptoState, state => state.filteredCryptos);
+export const selectLoading = createSelector(selectCryptoState, state => state.loading);
+
+
+// src/app/store/effects/crypto.effects.ts
+import { Injectable } from '@angular/core';
+import { Actions, createEffect, ofType } from '@ngrx/effects';
+import { catchError, map, mergeMap, of } from 'rxjs';
+import * as CryptoActions from '../actions/crypto.actions';
+import { CryptoService } from '../../services/crypto.service';
+
+@Injectable()
+export class CryptoEffects {
+  loadCryptos$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(CryptoActions.loadCryptos),
+      mergeMap(() => this.cryptoService.getLivePrices().pipe(
+        map(cryptos => CryptoActions.loadCryptosSuccess({ cryptos })),
+        catchError(error => of(CryptoActions.loadCryptosFailure({ error })))
+      ))
+    )
+  );
+
+  constructor(private actions$: Actions, private cryptoService: CryptoService) {}
+}
+
+
+// src/app/components/crypto-dashboard/crypto-dashboard.component.ts
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { Observable, Subject, interval, takeUntil } from 'rxjs';
+import * as CryptoActions from '../../store/actions/crypto.actions';
+import * as fromCrypto from '../../store/selectors/crypto.selectors';
+import { Crypto } from '../../models/crypto.model';
 
 @Component({
-  selector: 'app-root',
-  template: `
-    <app-header></app-header>
-    <router-outlet></router-outlet>
-  `,
+  selector: 'app-crypto-dashboard',
+  templateUrl: './crypto-dashboard.component.html',
+  styleUrls: ['./crypto-dashboard.component.css']
 })
-export class AppComponent {}
+export class CryptoDashboardComponent implements OnInit, OnDestroy {
+  cryptos$!: Observable<Crypto[]>;
+  loading$!: Observable<boolean>;
+  destroy$ = new Subject<void>();
 
+  constructor(private store: Store) {}
 
-// --- header.component.ts ---
-import { Component } from '@angular/core';
+  ngOnInit(): void {
+    this.cryptos$ = this.store.select(fromCrypto.selectAllCryptos);
+    this.loading$ = this.store.select(fromCrypto.selectLoading);
 
-@Component({
-  selector: 'app-header',
-  template: `
-    <nav>
-      <a routerLink="/employees">Employees</a>
-      <a routerLink="/add-employee">Add Employee</a>
-    </nav>
-  `,
-  styles: [`nav { padding: 10px; background: #eee; } nav a { margin-right: 10px; }`]
-})
-export class HeaderComponent {}
+    interval(5000).pipe(takeUntil(this.destroy$)).subscribe(() => {
+      this.store.dispatch(CryptoActions.loadCryptos());
+    });
 
+    this.store.dispatch(CryptoActions.loadCryptos());
+  }
 
-// --- employee-list.component.ts ---
-import { Component, OnInit } from '@angular/core';
-import { Employee, EmployeeService } from '../services/employee.service';
+  onSearch(query: string): void {
+    this.store.dispatch(CryptoActions.updateSearchQuery({ query }));
+  }
 
-@Component({
-  selector: 'app-employee-list',
-  template: `
-    <h2>Employee List</h2>
-    <ul>
-      <li *ngFor="let emp of employees">
-        <a [routerLink]="['/employees', emp.id]">{{ emp.name }} - {{ emp.position }}</a>
-      </li>
-    </ul>
-  `
-})
-export class EmployeeListComponent implements OnInit {
-  employees: Employee[] = [];
-
-  constructor(private employeeService: EmployeeService) {}
-
-  ngOnInit() {
-    this.employeeService.getEmployees().subscribe(data => this.employees = data);
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 }
 
 
-// --- employee-detail.component.ts ---
-import { Component, OnInit } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
-import { Employee, EmployeeService } from '../services/employee.service';
+// src/app/components/crypto-dashboard/crypto-dashboard.component.html
+<h2>📊 Live Crypto Prices (NgRx)</h2>
+<input
+  type="text"
+  placeholder="Search coin name or symbol"
+  (input)="onSearch($event.target.value)"
+  style="margin-bottom: 1rem; padding: 0.5rem; width: 300px"
+/>
 
-@Component({
-  selector: 'app-employee-detail',
-  template: `
-    <h2>Employee Details</h2>
-    <div *ngIf="employee">
-      <p><strong>Name:</strong> {{ employee.name }}</p>
-      <p><strong>Position:</strong> {{ employee.position }}</p>
-      <app-task-form [employee]="employee"></app-task-form>
-    </div>
-  `
+<table>
+  <thead>
+    <tr>
+      <th>Coin</th>
+      <th>Price (USD)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr *ngFor="let coin of cryptos$ | async">
+      <td><img [src]="coin.image" width="20"> {{ coin.name }} ({{ coin.symbol.toUpperCase() }})</td>
+      <td>{{ coin.current_price | currency:'USD':'symbol' }}</td>
+    </tr>
+  </tbody>
+</table>
+<p *ngIf="loading$ | async">🔄 Loading latest data...</p>
+
+
+// src/app/app.module.ts
+import { NgModule } from '@angular/core';
+import { BrowserModule } from '@angular/platform-browser';
+import { HttpClientModule } from '@angular/common/http';
+import { FormsModule } from '@angular/forms';
+import { StoreModule } from '@ngrx/store';
+import { EffectsModule } from '@ngrx/effects';
+import { StoreDevtoolsModule } from '@ngrx/store-devtools';
+
+import { AppComponent } from './app.component';
+import { CryptoDashboardComponent } from './components/crypto-dashboard/crypto-dashboard.component';
+import { cryptoReducer } from './store/reducers/crypto.reducer';
+import { CryptoEffects } from './store/effects/crypto.effects';
+
+@NgModule({
+  declarations: [AppComponent, CryptoDashboardComponent],
+  imports: [
+    BrowserModule,
+    HttpClientModule,
+    FormsModule,
+    StoreModule.forRoot({ crypto: cryptoReducer }),
+    EffectsModule.forRoot([CryptoEffects]),
+    StoreDevtoolsModule.instrument({ maxAge: 25 })
+  ],
+  bootstrap: [AppComponent]
 })
-export class EmployeeDetailComponent implements OnInit {
-  employee!: Employee;
-
-  constructor(private route: ActivatedRoute, private empService: EmployeeService) {}
-
-  ngOnInit() {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    this.empService.getEmployee(id).subscribe(data => this.employee = data);
-  }
-}
-
-
-// --- add-employee.component.ts ---
-import { Component } from '@angular/core';
-import { FormBuilder, FormGroup } from '@angular/forms';
-
-@Component({
-  selector: 'app-add-employee',
-  template: `
-    <h2>Add Employee</h2>
-    <form [formGroup]="empForm" (ngSubmit)="onSubmit()">
-      <input formControlName="name" placeholder="Name" />
-      <input formControlName="position" placeholder="Position" />
-      <button type="submit">Add</button>
-    </form>
-  `
-})
-export class AddEmployeeComponent {
-  empForm: FormGroup;
-
-  constructor(private fb: FormBuilder) {
-    this.empForm = this.fb.group({ name: '', position: '' });
-  }
-
-  onSubmit() {
-    console.log('Form submitted:', this.empForm.value);
-  }
-}
-
-
-// --- task-form.component.ts ---
-import { Component, Input } from '@angular/core';
-import { FormBuilder, FormGroup } from '@angular/forms';
-import { Employee } from '../services/employee.service';
-
-@Component({
-  selector: 'app-task-form',
-  template: `
-    <h3>Assign Task</h3>
-    <form [formGroup]="taskForm" (ngSubmit)="submitTask()">
-      <input formControlName="task" placeholder="Enter Task" />
-      <button type="submit">Assign</button>
-    </form>
-  `
-})
-export class TaskFormComponent {
-  @Input() employee!: Employee;
-  taskForm: FormGroup;
-
-  constructor(private fb: FormBuilder) {
-    this.taskForm = this.fb.group({ task: '' });
-  }
-
-  submitTask() {
-    const task = this.taskForm.value.task;
-    if (task) {
-      this.employee.tasks = this.employee.tasks || [];
-      this.employee.tasks.push(task);
-      this.taskForm.reset();
-      console.log(`Task added for ${this.employee.name}: ${task}`);
-    }
-  }
-}
+export class AppModule {}
